@@ -3,3 +3,4 @@ chromadb
 janus-swi
 openai
 uagents
+websockets
