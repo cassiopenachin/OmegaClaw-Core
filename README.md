@@ -32,7 +32,12 @@ of approximately 200 lines of code.
 
 ## Installation
 
-Prerequisites: Git, Python3, Pip and [venv](https://docs.python.org/3/library/venv.html) library
+Prerequisites: Git, Python3 including dev headers, Pip and [venv](https://docs.python.org/3/library/venv.html) library, C compiler (for building [janus-swi](https://pypi.org/project/janus-swi/) library)
+
+Under Ubuntu one can use the following command to install prerequisites:
+```
+sudo apt-get install git python3 python3-dev python3-pip python3-venv build-essential
+```
 
 Get [SWI-Prolog 9.1.12 or later](https://www.swi-prolog.org/).
 
@@ -54,7 +59,7 @@ source ./.venv/bin/activate
 
 If you have CPU only machine or don't want calculate embeddings on GPU:
 ```
-python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
 ```
 
 Install Python dependencies:
