@@ -101,18 +101,13 @@ def _is_allowed_message(channel_id, user_id, msg):
         if _authenticated_user_id is not None:
             return "allow" if user_id == _authenticated_user_id else "ignore"
         candidate = _parse_auth_candidate(msg)
-        if auth.verify_token(candidate):
+        user_id_check = auth.authenticate_channel_user('SLACK', user_id, candidate)
+        if user_id_check in ["auth_bound", "allow"]:
             _authenticated_user_id = user_id
             _channel_id = channel_id
-            if not auth.store_authenticated_user_id(user_id):
-                print(f"[SLACK] Could not store authenticated user ID {user_id!r} in nginx")
-            return "auth_bound"
+            return user_id_check
         else:
-            if auth.get_saved_user_id() == user_id:
-                _authenticated_user_id = user_id
-                _channel_id = channel_id
-                return "allow"
-        return "ignore"
+            return "ignore"
 
 
 def _parse_retry_after(value):

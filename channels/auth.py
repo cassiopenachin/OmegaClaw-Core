@@ -1,9 +1,12 @@
 import json
 import os
+import time
 import urllib.request
 
 _proxy_url = None
 _auth_enabled = None
+_CHANNEL_DIR_NAME = ".channel"
+_CHANNEL_AUTH_USER_FILE = "authenticated-user.json"
 
 
 def get_proxy_url():
@@ -46,36 +49,66 @@ def verify_token(candidate):
         return False
 
 
-def store_authenticated_user_id(user_id):
-    """Record an authenticated Slack user ID in the local nginx auth log."""
-    proxy = get_proxy_url()
-    if not proxy:
-        return False
-    url = f"{proxy}/auth/user"
-    req = urllib.request.Request(url, data=b"", method="POST")
-    req.add_header("X-Authenticated-User-Id", str(user_id))
+def _channel_auth_user_path():
+    memory_dir = os.environ["MEMORY_DIR"]
+    return os.path.join(memory_dir, _CHANNEL_DIR_NAME, _CHANNEL_AUTH_USER_FILE)
+
+
+def store_channel_authenticated_user_id(channel_identifier, user_id):
+    """Record an authenticated channel user ID in the memory directory."""
+    channel_identifier = str(channel_identifier or "").strip() or "DEFAULT"
+    user_id = str(user_id).strip()
+    if not user_id:
+        raise ValueError("user_id is required")
+    payload = {
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "channel_identifier": channel_identifier,
+        "user_id": user_id,
+    }
+    path = _channel_auth_user_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status == 204
-    except Exception:
+        with open(path, "a", encoding="utf-8") as f:
+            json.dump(payload, f, separators=(",", ":"))
+            f.write("\n")
+    except OSError as e:
+        raise RuntimeError("Failed to write channel authenticated user record") from e
+    return True
+
+
+def get_channel_saved_user_id(channel_identifier, user_id):
+    channel_identifier = str(channel_identifier or "").strip() or "DEFAULT"
+    user_id = str(user_id).strip()
+    if not user_id:
         return False
-
-
-def get_saved_user_id():
-    proxy = get_proxy_url()
-    if not proxy:
-        return None
     try:
-        with urllib.request.urlopen(f"{proxy}/auth/users", timeout=5) as resp:
-            lines = resp.read().decode("utf-8", errors="ignore").splitlines()
-    except Exception:
-        return None
+        path = _channel_auth_user_path()
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    record = json.loads(line)
+                    saved_channel_identifier = str(record.get("channel_identifier", "")).strip()
+                    saved_user_id = str(record.get("user_id", "")).strip()
+                except (AttributeError, json.JSONDecodeError):
+                    continue
+                if saved_channel_identifier == channel_identifier and saved_user_id == user_id:
+                    return True
+    except Exception as e:
+        raise RuntimeError("Failed to read channel authenticated user records") from e
+    return False
 
-    for line in reversed(lines):
-        try:
-            user_id = str(json.loads(line).get("user_id", "")).strip()
-        except (AttributeError, json.JSONDecodeError):
-            continue
-        if user_id:
-            return user_id
-    return None
+def authenticate_channel_user(channel_identifier, user_id, candidate):
+    # Check if there is a valid "auth <string>" token. 
+    # else see if there was a prior session with the user-id and channel.
+    # Otherwise ignore.
+    if verify_token(candidate) and \
+       store_channel_authenticated_user_id(channel_identifier, user_id):
+            label = str(channel_identifier).upper()
+            print(f"[{label}] Saved authenticated user ID")
+            return "auth_bound"
+    elif get_channel_saved_user_id(channel_identifier, user_id):
+        label = str(channel_identifier).upper()
+        print(f"[{label}] Verified previously validated user ID")
+        return "allow"
+    else:
+        return "ignore"

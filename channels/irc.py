@@ -64,16 +64,12 @@ def _is_allowed_message(nick, msg):
         if _authenticated_nick is not None:
             return "allow" if norm_nick == _authenticated_nick else "ignore"
         candidate = _parse_auth_candidate(msg)
-        if auth.verify_token(candidate):
+        user_id_check = auth.authenticate_channel_user('IRC', norm_nick, candidate)
+        if user_id_check in ["auth_bound", "allow"]:
             _authenticated_nick = norm_nick
-            if not auth.store_authenticated_user_id(norm_nick):
-                print(f"[IRC] Could not store authenticated nick {norm_nick!r} in nginx")
-            return "auth_bound"
+            return user_id_check
         else:
-            if auth.get_saved_user_id() == norm_nick:
-                _authenticated_nick = norm_nick
-                return "allow"
-        return "ignore"
+            return "ignore"
 
 def _irc_loop(channel, server, port, nick):
     global _running, _sock, _connected

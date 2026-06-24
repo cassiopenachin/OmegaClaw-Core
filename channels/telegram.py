@@ -129,18 +129,13 @@ def _is_allowed_message(chat_id, user_id, msg):
                 return "ignore"
             return "allow" if user_id == _authenticated_user_id else "ignore"
         candidate = _parse_auth_candidate(msg)
-        if auth.verify_token(candidate):
+        user_id_check = auth.authenticate_channel_user('TELEGRAM', user_id, candidate)
+        if user_id_check in ["auth_bound", "allow"]:
             _authenticated_user_id = user_id
             _chat_id = chat_id
-            if not auth.store_authenticated_user_id(user_id):
-                print(f"[TELEGRAM] Could not store authenticated user ID {user_id!r} in nginx")
-            return "auth_bound"
+            return user_id_check
         else:
-            if auth.get_saved_user_id() == user_id:
-                _authenticated_user_id = user_id
-                _chat_id = chat_id
-                return "allow"
-        return "ignore"
+            return "ignore"
 
 
 def _poll_loop():
