@@ -94,11 +94,16 @@ PY
 FROM ${SWIPL_IMAGE} AS runtime
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE force the runtime to load the baked model
+# from cache only. Without them a networked host silently re-resolves "main"
+# over the network, ignoring the pinned EMBEDDING_REVISION baked at build time.
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/opt/huggingface \
-    SENTENCE_TRANSFORMERS_HOME=/opt/sentence_transformers
+    SENTENCE_TRANSFORMERS_HOME=/opt/sentence_transformers \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
