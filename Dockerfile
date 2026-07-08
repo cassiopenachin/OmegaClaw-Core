@@ -74,12 +74,21 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
 # Pre-download the sentence-transformers model so runtime does not need network access.
 RUN mkdir -p "${HF_HOME}" "${SENTENCE_TRANSFORMERS_HOME}" \
  && python3 - <<PY
+import os
 from sentence_transformers import SentenceTransformer
 model_name = "${EMBEDDING_MODEL}"
 revision = "${EMBEDDING_REVISION}"
 print(f"Downloading embedding model: {model_name}@{revision}")
 SentenceTransformer(model_name, revision=revision)
-print("Model download complete.")
+# Downloading by commit hash does not create a refs/main pointer, but the
+# runtime loads the model by name with no revision and resolves refs/main from
+# the offline cache. Write it so the pinned snapshot loads offline (no network).
+cache = os.environ["SENTENCE_TRANSFORMERS_HOME"]
+refs = os.path.join(cache, "models--" + model_name.replace("/", "--"), "refs")
+os.makedirs(refs, exist_ok=True)
+with open(os.path.join(refs, "main"), "w") as f:
+    f.write(revision)
+print(f"Model download complete; refs/main pinned to {revision}")
 PY
 
 FROM ${SWIPL_IMAGE} AS runtime
