@@ -1,5 +1,5 @@
 !(import! &self (library lib_import))
-!(git-import! "https://github.com/asi-alliance/OmegaClaw-Core.git")
+!(assertaPredicate (Predicate (library_path "./repos/OmegaClaw-Core")))
 !(import! &self (library OmegaClaw-Core lib_omegaclaw))
 
 !(omegaclaw)
