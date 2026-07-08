@@ -20,7 +20,7 @@
 !(import! &self (library OmegaClaw-Core ./profile/policy))
 !(import! &self (library OmegaClaw-Core ./src/loop))
 !(import! &self (library OmegaClaw-Core ./src/rag.py))
-!(if (== () (collapse (callPredicate (Predicate (exists_directory "./repos/petta_lib_chromadb")))))
+!(if (== () (collapse (callPredicate (Predicate (access_file "./repos/petta_lib_chromadb/lib_chromadb.metta" exist)))))
      (progn (println! "FATAL: petta_lib_chromadb is not vendored at ./repos/petta_lib_chromadb. This fork does not fetch dependencies at boot; clone it into ./repos (see README) or use the built image.")
             (callPredicate (Predicate (halt 1))))
      (assertaPredicate (Predicate (library_path "./repos/petta_lib_chromadb"))))
