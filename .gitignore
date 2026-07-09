@@ -23,3 +23,6 @@ Autotests/logs/
 
 # IDE
 .idea/
+
+# hive-image build artifact (omegahive wheel, built from the pinned commit)
+vendor/

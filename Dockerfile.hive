@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1.7
+#
+# The hive image = the pinned base image (omegaclaw-base) + the stage-2 board-binding patches
+# + the pinned omegahive port client and its Postgres driver. The base image is NOT modified;
+# this is a thin layer on top, so the base's expensive builder stage (PeTTa/FAISS/torch/baked
+# embeddings) is reused unchanged. See docs/deployments/omegaclaw-fork.md (hive-image section).
+#
+# Pin the base by digest in CI/production; a local tag is fine for local builds.
+ARG BASE_IMAGE=omegaclaw-base:0.1
+FROM ${BASE_IMAGE}
+
+# Pinned omegahive port client (+ psycopg, pulled as a dependency). The wheel is a build
+# artifact built from the pinned omegahive commit and provided in the build context under
+# vendor/ (gitignored) — we never vendor port *source* into the fork. Production builds the
+# wheel from the pinned omegahive tag and records that pin in the deployments record.
+#
+# The base runtime stage carries the site-packages but not pip itself (it lived in the builder
+# stage), so install pip to add the port client, then drop the apt lists. The base image is
+# Python 3.11 and omegahive declares a >=3.12 dev target, but the port surface is 3.11-
+# compatible, so install with --ignore-requires-python (omegahive's declared target is unchanged).
+ARG OMEGAHIVE_WHEEL=vendor/omegahive-0.0.0-py3-none-any.whl
+# Trailing slash keeps the PEP 427 wheel filename (pip validates it).
+COPY ${OMEGAHIVE_WHEEL} /tmp/wheels/
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3-pip \
+ && python3 -m pip install --no-cache-dir --break-system-packages \
+      --ignore-requires-python /tmp/wheels/*.whl \
+ && rm -rf /tmp/wheels /var/lib/apt/lists/*
+
+# The patched fork source over the base's source (board adapter/skill, SAFE_VARS DSN,
+# LLM-usage logging). Re-establish the memory-dir ownership/permissions the base set, since
+# COPY resets them (the agent runs as nobody and memory/ is its only writable mount).
+COPY . ${OMEGACLAW_DIR}
+RUN cp ${OMEGACLAW_DIR}/run.metta /PeTTa/run.metta \
+ && chmod +x ${OMEGACLAW_DIR}/entrypoint.sh ${OMEGACLAW_DIR}/scripts/import_knowledge.sh \
+ && chown -R 65534:65534 ${MEMORY_DIR} \
+ && find ${MEMORY_DIR} -type f -exec chmod 0644 {} \; \
+ && chmod 0444 ${MEMORY_DIR}/prompt.txt
+
+ENTRYPOINT ["/PeTTa/repos/OmegaClaw-Core/entrypoint.sh"]
+CMD []
