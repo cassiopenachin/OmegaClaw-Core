@@ -39,7 +39,12 @@
                               (progn (configure WS_URL "")
                                      (configure WS_TOKEN "")
                                      (py-call (wschat.start_websocket (WS_URL) (WS_TOKEN))))
-                              (py-call (mock.start_mock)))))))))
+                              (if (== (commchannel) board)
+                                  ; Pass argv values directly via argk: a `configure` equation
+                                  ; added by add-atom is not visible to a py-call arg in the
+                                  ; same progn, so (run_id) would arrive unevaluated.
+                                  (py-call (board.start_board (argk run_id "") (argk actor_id "coordinator")))
+                                  (py-call (mock.start_mock))))))))))
 
 ;Receive the latest user message considering all communication channels:
 (= (receive)
@@ -53,7 +58,9 @@
                    (py-call (slack.getLastMessage))
                    (if (== (commchannel) mattermost)
                        (py-call (mattermost.getLastMessage))
-                       (py-call (mock.getLastMessage))))))))
+                       (if (== (commchannel) board)
+                           (py-call (board.getLastMessage))
+                           (py-call (mock.getLastMessage)))))))))
 
 ;Send a message to all communication channels:
 !(change-state! &lastsend "")
@@ -71,7 +78,9 @@
                                    (let $temp (cut) (py-call (slack.send_message $safemsg)))
                                    (if (== (commchannel) mattermost)
                                        (let $temp (cut) (py-call (mattermost.send_message $safemsg)))
-                                       (let $temp (cut) (py-call (mock.send_message $safemsg)))))))))) _))
+                                       (if (== (commchannel) board)
+                                           (let $temp (cut) (py-call (board.send_message $safemsg)))
+                                           (let $temp (cut) (py-call (mock.send_message $safemsg))))))))))) _))
 
 ;Search the internet for some information:
 (= (search $msg)
