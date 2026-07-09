@@ -11,6 +11,7 @@
     "- Append line to file: append-file filename string",
     ;COMMUNICATION CHANNELS:
     "- Send message to user: send string"
+    "- Emit one board operation, one of assign <task> <worker>, reassign <task> <worker>, escalate <task>, close <task>, reopen <task>, prune <task> (e.g. assign t1 w2): board string"
     "- Search the web: search string"
     "- Search the web using the Tavily Search Agent: tavily-search string"
     "- Get technical analysis for a stock ticker using the Technical Analysis Agent: technical-analysis ticker"
@@ -53,6 +54,9 @@
 
 (= (technical-analysis $ticker)
    (py-call (agentverse.technical_analysis $ticker)))
+
+(= (board $arg)
+   (py-call (board.board_op $arg)))
 
 !(import_prolog_functions_from_file (library OmegaClaw-Core ./src/skills.pl) (shell first_char gc read_file_tail))
 
