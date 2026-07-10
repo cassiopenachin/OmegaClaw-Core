@@ -23,15 +23,23 @@ class LlmMockAgent:
     def stop(self, timeout=None):
         self._rpc.stop(timeout)
 
+    def _fallback(self):
+        # Answer registered under the "__default__" key, returned when no specific prompt
+        # matches. Lets a test drive a canned reply for messages whose exact body is awkward to
+        # pre-register — e.g. a board-channel S-expression view, which is not a Python literal
+        # and so trips the eval() key extraction below.
+        with self._lock:
+            return self._answers.get("__default__", "")
+
     def chat(self, content):
         user = content.rsplit(":-:-:-:", 1)
         if len(user) < 2:
-            return ""
+            return self._fallback()
 
         try:
             body = eval(user[1])[1]
         except SyntaxError:
-            return ""
+            return self._fallback()
 
         # The agent escapes punctuation that would confuse its s-exp
         # parser ('->_apostrophe_, "->_quote_, \n->_newline_) before
@@ -69,7 +77,7 @@ class LlmMockAgent:
             return answer
         else:
             print(f"[LlmMockAgent] Mock doesn't have answer for: {body}")
-            return ""
+            return self._fallback()
 
     def on_set_answer(self, args):
         with self._lock:

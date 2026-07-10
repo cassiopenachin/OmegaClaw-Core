@@ -34,6 +34,7 @@ _delivered_cursor: int | None = None  # cursor as of the last getLastMessage (No
 _running = False
 _thread: threading.Thread | None = None
 _port: HiveCoordinatorPort | None = None
+_run_id = ""
 _actor_id = "coordinator"
 
 
@@ -108,12 +109,13 @@ def start_board(run_id: str, actor_id: str = "coordinator",
     actor_id = actor_id if isinstance(actor_id, str) and actor_id else "coordinator"
     run_id = run_id if isinstance(run_id, str) else ""
 
-    global _running, _thread, _port, _actor_id
+    global _running, _thread, _port, _run_id, _actor_id
     # Stop any previous poller before starting a new one (a re-init must not leak a thread).
     if _thread is not None and _thread.is_alive():
         _running = False
         _thread.join(timeout=poll_interval + 1)
 
+    _run_id = run_id
     _actor_id = actor_id
     # A missing/unreachable DB must not crash agent boot: log and leave the channel inactive
     # (getLastMessage returns "" and the agent boots) rather than propagating out of initChannels.
@@ -152,6 +154,92 @@ def send_message(text: str) -> bool:
     """No board event — the spike consumes no notes. Captured as a harness log line."""
     print(f"[BOARD_SEND] {text}", flush=True)
     return True
+
+
+def _parse_op(payload: str):
+    """Parse a single-string board op into an omegahive Op. Returns (op, None) or (None, error).
+    Grammar: assign/reassign <task> <worker> | escalate/close/reopen/prune <task> [reason...]."""
+    # The `board` skill is advertised on every deployment, but only the hive image installs
+    # omegahive — degrade to an error string, never raise into the agent loop.
+    try:
+        from omegahive.port import (
+            AssignOp, CloseOp, EscalateOp, PruneOp, ReassignOp, ReopenOp,
+        )
+    except ImportError:
+        return None, "board: unavailable (no board binding in this image)"
+
+    toks = payload.split()
+    if not toks:
+        return None, "board: empty op"
+    verb, rest = toks[0], toks[1:]
+
+    if verb == "assign":
+        if len(rest) < 2:
+            return None, "board: assign needs <task> <worker>"
+        return AssignOp(task_id=rest[0], worker=rest[1]), None
+    if verb == "reassign":
+        # reassign <task> <to>  (from unspecified) | reassign <task> <from> <to>
+        if len(rest) == 2:
+            op = ReassignOp.model_validate({"task_id": rest[0], "from": "", "to": rest[1]})
+            return op, None
+        if len(rest) >= 3:
+            op = ReassignOp.model_validate({"task_id": rest[0], "from": rest[1], "to": rest[2]})
+            return op, None
+        return None, "board: reassign needs <task> <worker>"
+    if verb in ("escalate", "close", "reopen", "prune"):
+        if not rest:
+            return None, f"board: {verb} needs <task>"
+        task, reason = rest[0], (" ".join(rest[1:]) or None)
+        if verb == "escalate":
+            return EscalateOp(task_id=task, reason=reason or "escalated by coordinator"), None
+        if verb == "close":
+            return CloseOp(task_id=task, reason=reason), None
+        if verb == "reopen":
+            return ReopenOp(task_id=task, reason=reason), None
+        return PruneOp(task_id=task, reason=reason), None
+
+    return None, (f"board: unknown op '{verb}' "
+                  "(assign|reassign|escalate|close|reopen|prune)")
+
+
+def board_op(payload: str) -> str:
+    """The `board` skill body: parse one op and emit it through a short-lived per-call port
+    client, constructor-seeded from the shared basis/cursor/generation store (so an intentional
+    repeat after a fresh view re-keys instead of silently deduping). One call = one emit; key
+    derivation (content+basis) is the port client's job. Returns the Accepted/Rejected outcome
+    as the skill's string result. Never raises into the agent loop."""
+    op, err = _parse_op(payload)
+    if err:
+        return err
+    if not _run_id:
+        return "board: channel not active (no run_id)"
+
+    from omegahive.events.envelope import Actor
+    from omegahive.port import Accepted, HiveCoordinatorPort
+
+    # The whole emit path (connect included) is inside try: a refusal is a value, but a
+    # connection loss / infra error must return a string, never propagate into the agent loop.
+    conn = None
+    try:
+        conn = _connect()
+        port = HiveCoordinatorPort(
+            Actor(role="coordinator", id=_actor_id), _run_id, conn,
+            workdir=_client_state_dir(), connect=_connect,
+        )
+        result = port.emit(op)   # idempotency_key=None -> client derives content+basis key
+    except Exception as exc:
+        return f"board: emit failed: {exc}"
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    event_type, _payload, task_id = op.to_emit()
+    if isinstance(result, Accepted):
+        return f"Accepted {event_type} {task_id}"
+    return f"Rejected {result.code}: {result.reason}"
 
 
 def stop_board() -> None:
