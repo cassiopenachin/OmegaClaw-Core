@@ -576,6 +576,7 @@ start() {
             -e OMEGACLAW_AUTH_SECRET="$OMEGACLAW_AUTH_SECRET"
             -e LLM_SERVER_LOCAL_URL="$llm_server_local_url"
             -e IMPORT_KB_ON_START="${IMPORT_KB_ON_START:-0}"
+            -e OMEGAHIVE_DATABASE_URL="${OMEGAHIVE_DATABASE_URL:-}"
             "$image"
             "commchannel=${commchannel}"
             "provider=${provider}"
@@ -595,6 +596,9 @@ start() {
       docker_cmd+=("WS_TOKEN=${WS_TOKEN}")
     elif [ "${commchannel}" = "test" ]; then
       docker_cmd+=("TEST_SERVER_IP=${TEST_SERVER_IP}")
+    elif [ "${commchannel}" = "board" ]; then
+      docker_cmd+=("run_id=${OMEGAHIVE_RUN_ID:-}")
+      docker_cmd+=("actor_id=${OMEGAHIVE_ACTOR_ID:-coordinator}")
     else
       echo "Unsupported commchannel: ${commchannel}" >&2
       return 1
