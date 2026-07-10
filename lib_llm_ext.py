@@ -7,6 +7,36 @@ def _log_raw(provider: str, model: str, raw: str) -> None:
     print(f"[LLM_RAW] ts={ts} provider={provider} model={model} chars={len(raw or '')} raw={raw!r}")
 
 
+def _usage_tokens(response) -> tuple:
+    """Per-call (tokens_in, tokens_out) from a provider response, or (-1, -1) if unavailable.
+    Handles both the Chat Completions shape (prompt_tokens/completion_tokens) and the
+    Responses API shape (input_tokens/output_tokens). Never raises."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return (-1, -1)
+
+    def pick(*names) -> int:
+        for n in names:
+            v = getattr(usage, n, None)
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return -1
+        return -1
+
+    return (pick("prompt_tokens", "input_tokens"), pick("completion_tokens", "output_tokens"))
+
+
+def _log_usage(provider: str, model: str, response) -> None:
+    """Emit per-call token usage beside [LLM_RAW]. Cost is a primary stage-2 outcome and the
+    raw-text line carries no usage; the gateway proxy logs bytes, not tokens."""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    tokens_in, tokens_out = _usage_tokens(response)
+    print(f"[LLM_USAGE] ts={ts} provider={provider} model={model} "
+          f"tokens_in={tokens_in} tokens_out={tokens_out}")
+
+
 class AbstractAIProvider:
     def __init__(self, name: str):
         self._name = name
@@ -83,6 +113,7 @@ class AIProvider(AbstractAIProvider):
 
             raw = response.choices[0].message.content or ""
             _log_raw(self._name, self._model_name, raw)
+            _log_usage(self._name, self._model_name, response)
             return self._clean_text(raw)
         except Exception as e:
             print(f"[lib_llm_ext.AIProvider.chat] Exception while communicating with LLM: {e}")
@@ -148,6 +179,7 @@ class AsiOneProvider(AIProvider):
 
             raw = response.choices[0].message.content
             _log_raw(self._name, self._model_name, raw)
+            _log_usage(self._name, self._model_name, response)
             resp = self._clean_text(raw)
             resp = resp.replace("</arg_value>", " ").replace("</tool_call>", " ").replace("<arg_value>", " ").replace("<tool_call>", " ")
             return resp
@@ -185,6 +217,7 @@ class OpenAIProvider(AIProvider):
 
             raw = response.output_text
             _log_raw(self._name, self._model_name, raw)
+            _log_usage(self._name, self._model_name, response)
             return self._clean_text(raw)
         except Exception as e:
             print(f"[lib_llm_ext.OpenAIProvider.chat] Exception while communicating with LLM: {e}")
@@ -268,5 +301,40 @@ def useLocalEmbedding(atom):
         atom,
         normalize_embeddings=True
     ).tolist()
+
+
+def _selftest_usage_logging() -> None:
+    """DB-free self-test of the [LLM_USAGE] token extraction and log line (run in-container:
+    `python lib_llm_ext.py`)."""
+    import contextlib
+    import io
+
+    class _U:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    class _R:
+        def __init__(self, usage):
+            self.usage = usage
+
+    # Chat Completions shape / Responses API shape / missing usage / bad values.
+    assert _usage_tokens(_R(_U(prompt_tokens=11, completion_tokens=7))) == (11, 7)
+    assert _usage_tokens(_R(_U(input_tokens=5, output_tokens=9))) == (5, 9)
+    assert _usage_tokens(_R(None)) == (-1, -1)
+    assert _usage_tokens(object()) == (-1, -1)
+    assert _usage_tokens(_R(_U(prompt_tokens=None, completion_tokens="x"))) == (-1, -1)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _log_usage("Anthropic", "claude-opus-4-8", _R(_U(prompt_tokens=3, completion_tokens=4)))
+    line = buf.getvalue()
+    for token in ("[LLM_USAGE]", "provider=Anthropic", "model=claude-opus-4-8",
+                  "tokens_in=3", "tokens_out=4"):
+        assert token in line, f"missing {token!r} in {line!r}"
+    print("lib_llm_ext usage-logging self-test: OK")
+
+
+if __name__ == "__main__":
+    _selftest_usage_logging()
 
 

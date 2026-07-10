@@ -32,3 +32,4 @@ mock/test_transition_pin_to_remember_mock.py
 test_websearch_smoke.py
 test_board_channel.py
 test_board_skill.py
+test_safe_vars.py

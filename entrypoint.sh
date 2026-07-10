@@ -23,14 +23,22 @@ fi
 SAFE_VARS="HOME USER PATH HOSTNAME TERM LANG LC_ALL \
   GATEWAY_URL PYTHONDONTWRITEBYTECODE PYTHONUNBUFFERED \
   HF_HOME SENTENCE_TRANSFORMERS_HOME HF_HUB_OFFLINE TRANSFORMERS_OFFLINE \
-  OMEGACLAW_DIR MEMORY_DIR LLM_SERVER_LOCAL_URL TEST_SERVER_IP"
+  OMEGACLAW_DIR MEMORY_DIR LLM_SERVER_LOCAL_URL TEST_SERVER_IP \
+  OMEGAHIVE_DATABASE_URL"
+# Note: the board channel runs in-process, so its Postgres DSN (OMEGAHIVE_DATABASE_URL) must
+# reach the agent — an agent that can run `shell` can already read it. Limit the blast radius
+# with a scoped DB role (deployment spec §4 reader/gateway split), not by scrubbing the DSN.
 
-env_args=""
+# Build the allowlisted env as a proper argv list (set --) so values with spaces or glob
+# characters (e.g. a libpq keyword DSN, or a password with a space) survive unsplit.
+run_args="$*"
+set --
 for var in $SAFE_VARS; do
   eval val=\${$var:-}
   if [ -n "$val" ]; then
-    env_args="$env_args $var=$val"
+    set -- "$@" "$var=$val"
   fi
 done
 
-exec env -i $env_args su nobody -s /bin/sh -c "sh run.sh run.metta $*"
+# shellcheck disable=SC2086  # run_args is intentionally word-split into separate config args
+exec env -i "$@" su nobody -s /bin/sh -c "sh run.sh run.metta $run_args"
